@@ -1,0 +1,31 @@
+services:
+  transcripter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UID: "${UID:-1000}"
+        GID: "${GID:-1000}"
+    image: youtube-transcripter:cpu
+    container_name: youtube-transcripter
+
+    # Brings the app back up on every boot, once Docker itself starts.
+    restart: unless-stopped
+
+    ports:
+      - "8501:8501"
+
+    volumes:
+      - ./data:/app/data       # SQLite history - keep this one backed up
+      - ./models:/app/models   # Whisper weights cache - avoids re-downloading
+
+    env_file:
+      - .env
+
+    shm_size: "1gb"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

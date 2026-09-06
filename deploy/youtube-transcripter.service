@@ -1,0 +1,23 @@
+# Optional safety net for Linux. The primary autostart mechanism is Docker's
+# own `restart: unless-stopped` policy in docker-compose.yml - this unit only
+# adds recovery after a manual `docker compose down`.
+#
+# Installed to /etc/systemd/system/ by install-autostart.sh
+[Unit]
+Description=YouTube Transcripter (Streamlit + Whisper)
+Documentation=file://__PROJECT_DIR__/README.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=__PROJECT_DIR__
+# CPU or GPU is decided by COMPOSE_FILE inside .env - see mode.sh
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+# GPU override. You normally do NOT pass this file by hand - it is activated
+# through COMPOSE_FILE in your .env (see `mode.sh` / `mode.ps1`).
+#
+# It only swaps the image and hands the GPU to the container. The device
+# preference itself still comes from WHISPER_DEVICE in .env, which defaults
+# to `auto` and falls back to CPU on its own if CUDA is unavailable.
+services:
+  transcripter:
+    build:
+      dockerfile: Dockerfile.gpu
+    image: youtube-transcripter:gpu
+
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
