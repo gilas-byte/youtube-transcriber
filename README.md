@@ -1,34 +1,106 @@
-# 🎬 YouTube Transcripter
+# YouTube Transcripter
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE) ![Language: Python](https://img.shields.io/badge/language-Python-blue)
+
+A local YouTube transcription app built with Streamlit, yt-dlp and faster-whisper.
+Runs in Docker on Linux, Windows and macOS, with SQLite history and Markdown export.
+
+## What it does
 
 Paste a YouTube link, pick a Whisper model, get the transcript.
-Everything runs **locally** on your machine inside Docker — no API keys, no cloud, no accounts.
-
-Works the same on **Linux, Windows and macOS**.
+Transcription runs **locally** on your machine — no transcription API keys or app accounts.
 
 - Downloads only the **audio** track with `yt-dlp` (fast, small)
 - Transcribes with **Whisper** via [`faster-whisper`](https://github.com/SYSTRAN/faster-whisper)
 - Keeps a searchable **history** in a local SQLite database
 - **Copy** the text or **download it as Markdown**, named after the video
 - **One-command switch** between CPU and NVIDIA GPU
-- **Starts by itself** every time you boot your computer
+- **Restarts automatically** when Docker starts, unless manually stopped
+
+**Limitations**
+
+- Internet access is required for YouTube downloads and the first download of each model.
+- Processes one video at a time; playlists and ongoing live streams are not supported.
+- Private, age-restricted or region-blocked videos may be unavailable; no login or cookie import is provided.
+- Videos over 180 minutes are rejected by default; change `MAX_DURATION_MINUTES` to raise the limit.
+- Transcripts can contain recognition errors and need review. This app does not export subtitle files.
+- GPU acceleration requires NVIDIA hardware and the GPU image; macOS uses CPU only.
+
+---
+
+## Project layout
+
+- `app/`: Streamlit entrypoint, configuration, transcription pipeline, database and UI.
+- `.streamlit/` and `.env.example`: theme, server settings and environment configuration.
+- `Dockerfile`, `Dockerfile.gpu` and `docker-compose*.yml`: CPU and NVIDIA GPU containers.
+- `deploy/`, `mode.sh`, `mode.ps1` and `start.cmd`: autostart, mode switching and Windows launcher.
+- `requirements.txt` and `LICENSE`: Python dependencies and MIT license.
+
+<details>
+<summary>Detailed file layout</summary>
+
+```
+youtube-transcriber/
+├── app/
+│   ├── main.py                 Streamlit entrypoint
+│   ├── config.py               Settings read from environment variables
+│   ├── core/
+│   │   ├── downloader.py       yt-dlp: metadata + audio extraction
+│   │   ├── transcriber.py      faster-whisper, model cache, GPU fallback
+│   │   ├── pipeline.py         Orchestrates the whole job
+│   │   ├── exporter.py         Markdown export + safe filenames
+│   │   └── errors.py           Errors the UI knows how to show
+│   ├── db/
+│   │   ├── database.py         Connection, schema, WAL, FTS5
+│   │   ├── models.py           Dataclasses
+│   │   └── repository.py       All SQL lives here
+│   └── ui/
+│       ├── styles.py           The red palette and page CSS
+│       ├── sidebar.py          Model picker, options, runtime status
+│       ├── result.py           Video card, transcript, action buttons
+│       ├── history.py          Sidebar history with search
+│       └── components.py       Clipboard button
+├── .streamlit/config.toml      Streamlit theme and server settings
+├── deploy/
+│   ├── install-autostart.sh    Optional boot service (Linux)
+│   ├── install-autostart.ps1   Optional logon task (Windows)
+│   └── uninstall-autostart.*   Removes them
+├── mode.sh / mode.ps1          Switch between CPU and GPU
+├── start.cmd                   Double-click launcher (Windows)
+├── data/  models/              Created at runtime; persisted on the host
+├── Dockerfile                  CPU image
+├── Dockerfile.gpu              CUDA image
+├── docker-compose.yml          Base stack
+├── docker-compose.gpu.yml      GPU override (activated via .env)
+├── .gitattributes              Forces LF so Windows clones build correctly
+├── requirements.txt            Python dependencies
+├── LICENSE                     MIT license
+└── .env.example                Copy to .env
+```
+
+</details>
 
 ---
 
 ## Table of contents
 
-1. [Requirements](#1-requirements)
-2. [Quick start](#2-quick-start)
-3. [Switching between CPU and GPU](#3-switching-between-cpu-and-gpu)
-4. [GPU setup (NVIDIA)](#4-gpu-setup-nvidia)
-5. [Autostart on boot](#5-autostart-on-boot)
-6. [How to use the app](#6-how-to-use-the-app)
-7. [Choosing a Whisper model](#7-choosing-a-whisper-model)
-8. [Configuration](#8-configuration)
-9. [Your data and backups](#9-your-data-and-backups)
-10. [Everyday commands](#10-everyday-commands)
-11. [Troubleshooting](#11-troubleshooting)
-12. [Uninstall](#12-uninstall)
-13. [Project layout](#13-project-layout)
+- [What it does](#what-it-does)
+- [Project layout](#project-layout)
+- [Requirements](#1-requirements)
+- [Quick start](#2-quick-start)
+- [Switching between CPU and GPU](#3-switching-between-cpu-and-gpu)
+- [GPU setup (NVIDIA)](#4-gpu-setup-nvidia)
+- [Autostart on boot](#5-autostart-on-boot)
+- [How to use the app](#6-how-to-use-the-app)
+- [Choosing a Whisper model](#7-choosing-a-whisper-model)
+- [Configuration](#8-configuration)
+- [Your data and backups](#9-your-data-and-backups)
+- [Everyday commands](#10-everyday-commands)
+- [Troubleshooting](#11-troubleshooting)
+- [Uninstall](#12-uninstall)
+- [Status](#status)
+- [Credits](#credits)
+- [License](#license)
 
 ---
 
@@ -118,7 +190,7 @@ GPU acceleration is **not** available on macOS — the app runs on CPU.
 ### 🐧 Linux / 🍎 macOS
 
 ```bash
-cd youtube-transcripter
+cd youtube-transcriber
 cp .env.example .env
 docker compose up -d --build
 ```
@@ -126,7 +198,7 @@ docker compose up -d --build
 ### 🪟 Windows (PowerShell)
 
 ```powershell
-cd youtube-transcripter
+cd youtube-transcriber
 Copy-Item .env.example .env
 docker compose up -d --build
 ```
@@ -148,8 +220,8 @@ docker compose ps
 You should see `youtube-transcripter` with status `Up (healthy)`.
 
 > ⏳ **The first transcription is slower.** Whisper downloads the model you
-> picked (0.5–3 GB) the first time you use it. It is cached in `./models/` and
-> reused forever after.
+> picked (approximately 0.6–5 GB, depending on the model) the first time you
+> use it. It is cached in `./models/` and reused on subsequent runs.
 
 ---
 
@@ -452,12 +524,13 @@ ports:
 
 | Folder | Contents | Back it up? |
 |---|---|---|
-| `./data/` | `transcripts.db` — every transcription you have made | ✅ **Yes** |
-| `./models/` | Whisper weights | ❌ No, they re-download |
-| `./downloads/` | Temporary audio, wiped after each run | ❌ No |
+| `./data/` | `transcripts.db` — every transcription you have made | **Yes** |
+| `./models/` | Whisper weights | No, they re-download |
+| `/app/downloads/` (inside the container) | Temporary audio, removed after transcription | No |
 
-These are ordinary folders next to the project on **all platforms** — on
-Windows you can open `data\` in Explorer like any other folder.
+`data/` and `models/` are ordinary folders next to the project on **all platforms** —
+on Windows you can open `data\` in Explorer like any other folder.
+The default Compose stack does not mount `downloads/` on the host.
 
 **Backup**
 ```bash
@@ -669,51 +742,14 @@ docker compose down
 docker rmi youtube-transcripter:cpu youtube-transcripter:gpu
 ```
 
-To also delete your transcriptions and cached models, remove the `data/`,
-`models/` and `downloads/` folders.
+To also delete your transcriptions and cached models, remove the `data/` and
+`models/` folders. Temporary files in `/app/downloads/` are removed with the container.
 
 ---
 
-## 13. Project layout
+## Status
 
-```
-youtube-transcripter/
-├── app/
-│   ├── main.py                 Streamlit entrypoint
-│   ├── config.py               Settings read from .env
-│   ├── core/
-│   │   ├── downloader.py       yt-dlp: metadata + audio extraction
-│   │   ├── transcriber.py      faster-whisper, model cache, GPU fallback
-│   │   ├── pipeline.py         Orchestrates the whole job
-│   │   ├── exporter.py         Markdown export + safe filenames
-│   │   └── errors.py           Errors the UI knows how to show
-│   ├── db/
-│   │   ├── database.py         Connection, schema, WAL, FTS5
-│   │   ├── models.py           Dataclasses
-│   │   └── repository.py       All SQL lives here
-│   └── ui/
-│       ├── styles.py           The red palette and page CSS
-│       ├── sidebar.py          Model picker, options, runtime status
-│       ├── result.py           Video card, transcript, action buttons
-│       ├── history.py          Sidebar history with search
-│       └── components.py       Clipboard button
-├── .streamlit/config.toml      Streamlit theme and server settings
-├── deploy/
-│   ├── install-autostart.sh    Optional boot service (Linux)
-│   ├── install-autostart.ps1   Optional logon task (Windows)
-│   └── uninstall-autostart.*   Removes them
-├── mode.sh / mode.ps1          Switch between CPU and GPU
-├── start.cmd                   Double-click launcher (Windows)
-├── data/  models/  downloads/  Persisted folders
-├── Dockerfile                  CPU image
-├── Dockerfile.gpu              CUDA image
-├── docker-compose.yml          Base stack
-├── docker-compose.gpu.yml      GPU override (activated via .env)
-├── .gitattributes              Forces LF so Windows clones build correctly
-└── .env.example                Copy to .env
-```
-
----
+Active — available for local use with CPU and optional NVIDIA GPU support.
 
 ## Credits
 
@@ -722,3 +758,7 @@ Built with [Streamlit](https://streamlit.io), [yt-dlp](https://github.com/yt-dlp
 [OpenAI Whisper](https://github.com/openai/whisper) models.
 
 Transcribe only content you have the right to use.
+
+## License
+
+Licensed under the [MIT License](LICENSE).
